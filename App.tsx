@@ -10,7 +10,9 @@ import {
   ScrollView,
   Switch,
   Modal,
+  Image,
 } from "react-native";
+import * as ImagePicker from "expo-image-picker";
 
 type Tab = "feed" | "search" | "post" | "profile";
 type ReactionKey = "fire" | "heart" | "laugh" | "wow";
@@ -27,6 +29,7 @@ type Post = {
   anonymous: boolean;
   text: string;
   location: string;
+  imageUri?: string;
   reactions: Record<ReactionKey, number>;
   comments: Comment[];
 };
@@ -67,24 +70,16 @@ export default function App() {
       reactions: { fire: 5, heart: 14, laugh: 2, wow: 1 },
       comments: [{ id: "c3", author: "Anonymous", text: "Rose Park Roasters is solid." }],
     },
-    {
-      id: "3",
-      author: "Anonymous",
-      anonymous: true,
-      text: "This app idea is actually sick. Local anonymous city feeds could be huge.",
-      location: "Los Angeles",
-      reactions: { fire: 22, heart: 19, laugh: 7, wow: 8 },
-      comments: [],
-    },
   ]);
 
-  function addPost(text: string, anonymous: boolean) {
+  function addPost(text: string, anonymous: boolean, imageUri?: string) {
     const newPost: Post = {
       id: Date.now().toString(),
       author: anonymous ? "Anonymous" : `@${username}`,
       anonymous,
       text,
       location: selectedArea,
+      imageUri,
       reactions: { fire: 0, heart: 0, laugh: 0, wow: 0 },
       comments: [],
     };
@@ -230,11 +225,7 @@ function FeedScreen({
           </View>
         }
         renderItem={({ item }) => (
-          <PostCard
-            post={item}
-            onReact={onReact}
-            onOpen={() => onOpenPost(item)}
-          />
+          <PostCard post={item} onReact={onReact} onOpen={() => onOpenPost(item)} />
         )}
       />
 
@@ -271,7 +262,9 @@ function PostCard({
         <Text style={styles.more}>•••</Text>
       </View>
 
-      <Text style={styles.postText}>{post.text}</Text>
+      {!!post.text && <Text style={styles.postText}>{post.text}</Text>}
+
+      {post.imageUri && <Image source={{ uri: post.imageUri }} style={styles.postImage} />}
 
       <View style={styles.reactionRow}>
         {reactionButtons.map((reaction) => (
@@ -363,14 +356,33 @@ function CreatePostScreen({
   addPost,
   selectedArea,
 }: {
-  addPost: (text: string, anonymous: boolean) => void;
+  addPost: (text: string, anonymous: boolean, imageUri?: string) => void;
   selectedArea: string;
 }) {
   const [text, setText] = useState("");
   const [anonymous, setAnonymous] = useState(true);
+  const [imageUri, setImageUri] = useState<string | undefined>(undefined);
+
+  async function pickImage() {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      alert("Permission to access photos is required.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      setImageUri(result.assets[0].uri);
+    }
+  }
 
   return (
-    <View style={styles.screen}>
+    <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: 130 }}>
       <Text style={styles.screenTitle}>Create Post</Text>
       <Text style={styles.screenSubtext}>Posting to {selectedArea}</Text>
 
@@ -383,12 +395,18 @@ function CreatePostScreen({
         onChangeText={setText}
       />
 
+      <Pressable style={styles.secondaryButton} onPress={pickImage}>
+        <Text style={styles.secondaryButtonText}>
+          {imageUri ? "Change Photo" : "Add Photo"}
+        </Text>
+      </Pressable>
+
+      {imageUri && <Image source={{ uri: imageUri }} style={styles.previewImage} />}
+
       <View style={styles.switchRow}>
         <View>
           <Text style={styles.switchLabel}>Post anonymously</Text>
-          <Text style={styles.switchHelp}>
-            Hide your username on this post.
-          </Text>
+          <Text style={styles.switchHelp}>Hide your username on this post.</Text>
         </View>
         <Switch value={anonymous} onValueChange={setAnonymous} />
       </View>
@@ -396,16 +414,17 @@ function CreatePostScreen({
       <Pressable
         style={styles.primaryButton}
         onPress={() => {
-          if (text.trim()) {
-            addPost(text.trim(), anonymous);
+          if (text.trim() || imageUri) {
+            addPost(text.trim(), anonymous, imageUri);
             setText("");
+            setImageUri(undefined);
             setAnonymous(true);
           }
         }}
       >
         <Text style={styles.primaryButtonText}>Publish</Text>
       </Pressable>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -422,9 +441,7 @@ function ProfileScreen({
 
       <View style={styles.profileCard}>
         <View style={styles.profileAvatar}>
-          <Text style={styles.profileAvatarText}>
-            {username[0]?.toUpperCase()}
-          </Text>
+          <Text style={styles.profileAvatarText}>{username[0]?.toUpperCase()}</Text>
         </View>
 
         <Text style={styles.profileName}>@{username}</Text>
@@ -684,6 +701,13 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 14,
   },
+  postImage: {
+    width: "100%",
+    height: 240,
+    borderRadius: 22,
+    marginBottom: 14,
+    backgroundColor: "#1E293B",
+  },
   reactionRow: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -711,10 +735,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#2563EB",
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#2563EB",
-    shadowOpacity: 0.4,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
   },
   floatingButtonText: {
     color: "white",
@@ -769,6 +789,26 @@ const styles = StyleSheet.create({
     color: "white",
     fontWeight: "900",
     fontSize: 16,
+  },
+  secondaryButton: {
+    backgroundColor: "#111827",
+    padding: 15,
+    borderRadius: 18,
+    alignItems: "center",
+    marginTop: 14,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+  },
+  secondaryButtonText: {
+    color: "#E2E8F0",
+    fontWeight: "900",
+  },
+  previewImage: {
+    width: "100%",
+    height: 220,
+    borderRadius: 22,
+    marginTop: 14,
+    backgroundColor: "#1E293B",
   },
   smallTitle: {
     color: "white",
