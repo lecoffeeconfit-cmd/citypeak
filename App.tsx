@@ -9,9 +9,17 @@ import {
   TextInput,
   ScrollView,
   Switch,
+  Modal,
 } from "react-native";
 
 type Tab = "feed" | "search" | "post" | "profile";
+type ReactionKey = "fire" | "heart" | "laugh" | "wow";
+
+type Comment = {
+  id: string;
+  author: string;
+  text: string;
+};
 
 type Post = {
   id: string;
@@ -19,35 +27,54 @@ type Post = {
   anonymous: boolean;
   text: string;
   location: string;
-  reactions: {
-    fire: number;
-    heart: number;
-    laugh: number;
-    comments: number;
-  };
+  reactions: Record<ReactionKey, number>;
+  comments: Comment[];
 };
+
+const reactionButtons: { key: ReactionKey; emoji: string }[] = [
+  { key: "fire", emoji: "🔥" },
+  { key: "heart", emoji: "❤️" },
+  { key: "laugh", emoji: "😂" },
+  { key: "wow", emoji: "😮" },
+];
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("feed");
   const [selectedArea, setSelectedArea] = useState("Long Beach");
   const [search, setSearch] = useState("");
   const [username, setUsername] = useState("howie");
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+
   const [posts, setPosts] = useState<Post[]>([
     {
       id: "1",
       author: "Anonymous",
       anonymous: true,
-      text: "Anyone know what’s happening downtown tonight?",
+      text: "Anyone know what’s happening downtown tonight? Hearing helicopters near Pine Ave.",
       location: "Long Beach",
-      reactions: { fire: 12, heart: 8, laugh: 3, comments: 4 },
+      reactions: { fire: 12, heart: 8, laugh: 3, wow: 6 },
+      comments: [
+        { id: "c1", author: "Anonymous", text: "I heard it too near Ocean Blvd." },
+        { id: "c2", author: "@local808", text: "Probably an event by the Pike." },
+      ],
     },
     {
       id: "2",
       author: "@howie",
       anonymous: false,
-      text: "Looking for a good coffee shop to work from near the beach.",
+      text: "Looking for a good coffee shop to work from near the beach. Good WiFi is a must.",
       location: "Long Beach",
-      reactions: { fire: 5, heart: 14, laugh: 2, comments: 6 },
+      reactions: { fire: 5, heart: 14, laugh: 2, wow: 1 },
+      comments: [{ id: "c3", author: "Anonymous", text: "Rose Park Roasters is solid." }],
+    },
+    {
+      id: "3",
+      author: "Anonymous",
+      anonymous: true,
+      text: "This app idea is actually sick. Local anonymous city feeds could be huge.",
+      location: "Los Angeles",
+      reactions: { fire: 22, heart: 19, laugh: 7, wow: 8 },
+      comments: [],
     },
   ]);
 
@@ -58,22 +85,85 @@ export default function App() {
       anonymous,
       text,
       location: selectedArea,
-      reactions: { fire: 0, heart: 0, laugh: 0, comments: 0 },
+      reactions: { fire: 0, heart: 0, laugh: 0, wow: 0 },
+      comments: [],
     };
 
     setPosts([newPost, ...posts]);
     setTab("feed");
   }
 
+  function reactToPost(postId: string, reaction: ReactionKey) {
+    setPosts((currentPosts) =>
+      currentPosts.map((post) =>
+        post.id === postId
+          ? {
+              ...post,
+              reactions: {
+                ...post.reactions,
+                [reaction]: post.reactions[reaction] + 1,
+              },
+            }
+          : post
+      )
+    );
+
+    setSelectedPost((current) =>
+      current && current.id === postId
+        ? {
+            ...current,
+            reactions: {
+              ...current.reactions,
+              [reaction]: current.reactions[reaction] + 1,
+            },
+          }
+        : current
+    );
+  }
+
+  function addComment(postId: string, text: string, anonymous: boolean) {
+    const newComment: Comment = {
+      id: Date.now().toString(),
+      author: anonymous ? "Anonymous" : `@${username}`,
+      text,
+    };
+
+    setPosts((currentPosts) =>
+      currentPosts.map((post) =>
+        post.id === postId
+          ? { ...post, comments: [...post.comments, newComment] }
+          : post
+      )
+    );
+
+    setSelectedPost((current) =>
+      current && current.id === postId
+        ? { ...current, comments: [...current.comments, newComment] }
+        : current
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.logo}>CityPeak</Text>
-        <Text style={styles.subtitle}>Local posts by city or ZIP</Text>
+        <View>
+          <Text style={styles.logo}>CityPeak</Text>
+          <Text style={styles.subtitle}>Local anonymous city feeds</Text>
+        </View>
+
+        <Pressable style={styles.headerPill} onPress={() => setTab("search")}>
+          <Text style={styles.headerPillText}>{selectedArea}</Text>
+        </Pressable>
       </View>
 
       {tab === "feed" && (
-        <FeedScreen posts={posts} selectedArea={selectedArea} />
+        <FeedScreen
+          posts={posts}
+          selectedArea={selectedArea}
+          setTab={setTab}
+          onReact={reactToPost}
+          onOpenPost={setSelectedPost}
+        />
       )}
 
       {tab === "search" && (
@@ -85,13 +175,20 @@ export default function App() {
         />
       )}
 
-      {tab === "post" && <CreatePostScreen addPost={addPost} />}
+      {tab === "post" && <CreatePostScreen addPost={addPost} selectedArea={selectedArea} />}
 
       {tab === "profile" && (
         <ProfileScreen username={username} setUsername={setUsername} />
       )}
 
       <BottomNav tab={tab} setTab={setTab} />
+
+      <PostDetailsModal
+        post={selectedPost}
+        onClose={() => setSelectedPost(null)}
+        onReact={reactToPost}
+        onAddComment={addComment}
+      />
     </SafeAreaView>
   );
 }
@@ -99,62 +196,101 @@ export default function App() {
 function FeedScreen({
   posts,
   selectedArea,
+  setTab,
+  onReact,
+  onOpenPost,
 }: {
   posts: Post[];
   selectedArea: string;
+  setTab: (tab: Tab) => void;
+  onReact: (postId: string, reaction: ReactionKey) => void;
+  onOpenPost: (post: Post) => void;
 }) {
   const filteredPosts = posts.filter((post) => post.location === selectedArea);
 
   return (
-    <FlatList
-      data={filteredPosts}
-      keyExtractor={(item) => item.id}
-      contentContainerStyle={styles.feedList}
-      ListHeaderComponent={
-        <View style={styles.areaCard}>
-          <Text style={styles.areaLabel}>Current Area</Text>
-          <Text style={styles.areaText}>{selectedArea}</Text>
-          <Text style={styles.areaSubtext}>
-            Anonymous and public posts from this area.
-          </Text>
-        </View>
-      }
-      ListEmptyComponent={
-        <View style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>No posts here yet</Text>
-          <Text style={styles.muted}>Create the first post for this area.</Text>
-        </View>
-      }
-      renderItem={({ item }) => <PostCard post={item} />}
-    />
+    <View style={{ flex: 1 }}>
+      <FlatList
+        data={filteredPosts}
+        keyExtractor={(item) => item.id}
+        contentContainerStyle={styles.feedList}
+        ListHeaderComponent={
+          <View style={styles.heroCard}>
+            <Text style={styles.heroKicker}>Now peaking in</Text>
+            <Text style={styles.heroTitle}>{selectedArea}</Text>
+            <Text style={styles.heroText}>
+              See what people nearby are talking about. Post anonymously or with your username.
+            </Text>
+          </View>
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>No posts here yet</Text>
+            <Text style={styles.muted}>Create the first post for this area.</Text>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <PostCard
+            post={item}
+            onReact={onReact}
+            onOpen={() => onOpenPost(item)}
+          />
+        )}
+      />
+
+      <Pressable style={styles.floatingButton} onPress={() => setTab("post")}>
+        <Text style={styles.floatingButtonText}>+</Text>
+      </Pressable>
+    </View>
   );
 }
 
-function PostCard({ post }: { post: Post }) {
+function PostCard({
+  post,
+  onReact,
+  onOpen,
+}: {
+  post: Post;
+  onReact: (postId: string, reaction: ReactionKey) => void;
+  onOpen: () => void;
+}) {
   return (
-    <View style={styles.postCard}>
+    <Pressable style={styles.postCard} onPress={onOpen}>
       <View style={styles.postHeader}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>
-            {post.anonymous ? "?" : post.author.replace("@", "")[0]}
+            {post.anonymous ? "?" : post.author.replace("@", "")[0]?.toUpperCase()}
           </Text>
         </View>
 
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={styles.author}>{post.author}</Text>
           <Text style={styles.location}>{post.location}</Text>
         </View>
+
+        <Text style={styles.more}>•••</Text>
       </View>
 
       <Text style={styles.postText}>{post.text}</Text>
 
       <View style={styles.reactionRow}>
-        <Text style={styles.reaction}>🔥 {post.reactions.fire}</Text>
-        <Text style={styles.reaction}>❤️ {post.reactions.heart}</Text>
-        <Text style={styles.reaction}>😂 {post.reactions.laugh}</Text>
-        <Text style={styles.reaction}>💬 {post.reactions.comments}</Text>
+        {reactionButtons.map((reaction) => (
+          <Pressable
+            key={reaction.key}
+            style={styles.reaction}
+            onPress={() => onReact(post.id, reaction.key)}
+          >
+            <Text style={styles.reactionText}>
+              {reaction.emoji} {post.reactions[reaction.key]}
+            </Text>
+          </Pressable>
+        ))}
+
+        <View style={styles.reaction}>
+          <Text style={styles.reactionText}>💬 {post.comments.length}</Text>
+        </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -176,6 +312,8 @@ function SearchScreen({
     "Irvine",
     "Santa Monica",
     "San Diego",
+    "Hollywood",
+    "Pasadena",
   ];
 
   function chooseArea(value: string) {
@@ -185,8 +323,11 @@ function SearchScreen({
   }
 
   return (
-    <ScrollView style={styles.screen}>
-      <Text style={styles.screenTitle}>Search city or ZIP</Text>
+    <ScrollView style={styles.screen} contentContainerStyle={{ paddingBottom: 130 }}>
+      <Text style={styles.screenTitle}>Search local feeds</Text>
+      <Text style={styles.screenSubtext}>
+        Enter a city or ZIP code to view posts from that area.
+      </Text>
 
       <TextInput
         style={styles.input}
@@ -209,11 +350,7 @@ function SearchScreen({
 
       <View style={styles.chipWrap}>
         {popularAreas.map((area) => (
-          <Pressable
-            key={area}
-            style={styles.chip}
-            onPress={() => chooseArea(area)}
-          >
+          <Pressable key={area} style={styles.chip} onPress={() => chooseArea(area)}>
             <Text style={styles.chipText}>{area}</Text>
           </Pressable>
         ))}
@@ -224,8 +361,10 @@ function SearchScreen({
 
 function CreatePostScreen({
   addPost,
+  selectedArea,
 }: {
   addPost: (text: string, anonymous: boolean) => void;
+  selectedArea: string;
 }) {
   const [text, setText] = useState("");
   const [anonymous, setAnonymous] = useState(true);
@@ -233,6 +372,7 @@ function CreatePostScreen({
   return (
     <View style={styles.screen}>
       <Text style={styles.screenTitle}>Create Post</Text>
+      <Text style={styles.screenSubtext}>Posting to {selectedArea}</Text>
 
       <TextInput
         style={styles.textArea}
@@ -244,7 +384,12 @@ function CreatePostScreen({
       />
 
       <View style={styles.switchRow}>
-        <Text style={styles.switchLabel}>Post anonymously</Text>
+        <View>
+          <Text style={styles.switchLabel}>Post anonymously</Text>
+          <Text style={styles.switchHelp}>
+            Hide your username on this post.
+          </Text>
+        </View>
         <Switch value={anonymous} onValueChange={setAnonymous} />
       </View>
 
@@ -254,6 +399,7 @@ function CreatePostScreen({
           if (text.trim()) {
             addPost(text.trim(), anonymous);
             setText("");
+            setAnonymous(true);
           }
         }}
       >
@@ -282,7 +428,24 @@ function ProfileScreen({
         </View>
 
         <Text style={styles.profileName}>@{username}</Text>
-        <Text style={styles.muted}>Used when you choose not to post anonymously.</Text>
+        <Text style={styles.muted}>
+          Used when you choose not to post anonymously.
+        </Text>
+
+        <View style={styles.statsRow}>
+          <View style={styles.statBox}>
+            <Text style={styles.statNumber}>12</Text>
+            <Text style={styles.statLabel}>Posts</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={styles.statNumber}>248</Text>
+            <Text style={styles.statLabel}>Reactions</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={styles.statNumber}>5</Text>
+            <Text style={styles.statLabel}>Areas</Text>
+          </View>
+        </View>
       </View>
 
       <Text style={styles.smallTitle}>Username</Text>
@@ -298,6 +461,83 @@ function ProfileScreen({
   );
 }
 
+function PostDetailsModal({
+  post,
+  onClose,
+  onReact,
+  onAddComment,
+}: {
+  post: Post | null;
+  onClose: () => void;
+  onReact: (postId: string, reaction: ReactionKey) => void;
+  onAddComment: (postId: string, text: string, anonymous: boolean) => void;
+}) {
+  const [commentText, setCommentText] = useState("");
+  const [anonymous, setAnonymous] = useState(true);
+
+  if (!post) return null;
+
+  return (
+    <Modal visible={!!post} animationType="slide" transparent>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Post Details</Text>
+            <Pressable onPress={onClose}>
+              <Text style={styles.closeButton}>✕</Text>
+            </Pressable>
+          </View>
+
+          <ScrollView contentContainerStyle={{ paddingBottom: 30 }}>
+            <PostCard post={post} onReact={onReact} onOpen={() => {}} />
+
+            <Text style={styles.smallTitle}>Comments</Text>
+
+            {post.comments.length === 0 ? (
+              <View style={styles.emptyCommentCard}>
+                <Text style={styles.muted}>No comments yet. Start the conversation.</Text>
+              </View>
+            ) : (
+              post.comments.map((comment) => (
+                <View key={comment.id} style={styles.commentCard}>
+                  <Text style={styles.commentAuthor}>{comment.author}</Text>
+                  <Text style={styles.commentText}>{comment.text}</Text>
+                </View>
+              ))
+            )}
+
+            <View style={styles.commentComposer}>
+              <TextInput
+                style={styles.commentInput}
+                placeholder="Add a comment..."
+                placeholderTextColor="#64748B"
+                value={commentText}
+                onChangeText={setCommentText}
+              />
+
+              <View style={styles.commentControls}>
+                <Text style={styles.switchHelp}>Anon</Text>
+                <Switch value={anonymous} onValueChange={setAnonymous} />
+                <Pressable
+                  style={styles.sendButton}
+                  onPress={() => {
+                    if (commentText.trim()) {
+                      onAddComment(post.id, commentText.trim(), anonymous);
+                      setCommentText("");
+                    }
+                  }}
+                >
+                  <Text style={styles.sendButtonText}>Send</Text>
+                </Pressable>
+              </View>
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function BottomNav({
   tab,
   setTab,
@@ -306,22 +546,26 @@ function BottomNav({
   setTab: (tab: Tab) => void;
 }) {
   const items: { key: Tab; label: string }[] = [
-    { key: "feed", label: "🏠 Feed" },
-    { key: "search", label: "🔍 Search" },
-    { key: "post", label: "➕ Post" },
-    { key: "profile", label: "👤 Profile" },
+    { key: "feed", label: "Feed" },
+    { key: "search", label: "Search" },
+    { key: "post", label: "Post" },
+    { key: "profile", label: "Profile" },
   ];
 
   return (
     <View style={styles.bottomNav}>
       {items.map((item) => (
-        <Pressable key={item.key} onPress={() => setTab(item.key)}>
-          <Text
-            style={[
-              styles.navItem,
-              tab === item.key && styles.navItemActive,
-            ]}
-          >
+        <Pressable key={item.key} onPress={() => setTab(item.key)} style={styles.navButton}>
+          <Text style={tab === item.key ? styles.navIconActive : styles.navIcon}>
+            {item.key === "feed"
+              ? "🏠"
+              : item.key === "search"
+              ? "🔍"
+              : item.key === "post"
+              ? "➕"
+              : "👤"}
+          </Text>
+          <Text style={tab === item.key ? styles.navItemActive : styles.navItem}>
             {item.label}
           </Text>
         </Pressable>
@@ -338,7 +582,10 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 20,
-    paddingBottom: 16,
+    paddingBottom: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   logo: {
     color: "white",
@@ -349,49 +596,53 @@ const styles = StyleSheet.create({
     color: "#94A3B8",
     marginTop: 4,
   },
+  headerPill: {
+    backgroundColor: "#0F172A",
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    maxWidth: 140,
+  },
+  headerPillText: {
+    color: "#38BDF8",
+    fontWeight: "900",
+  },
   feedList: {
     paddingHorizontal: 20,
-    paddingBottom: 100,
+    paddingBottom: 120,
   },
-  screen: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 100,
-  },
-  screenTitle: {
-    color: "white",
-    fontSize: 26,
-    fontWeight: "900",
-    marginBottom: 16,
-  },
-  areaCard: {
+  heroCard: {
     backgroundColor: "#0F172A",
-    padding: 18,
-    borderRadius: 24,
+    padding: 20,
+    borderRadius: 28,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: "#1E293B",
   },
-  areaLabel: {
+  heroKicker: {
     color: "#38BDF8",
     fontSize: 12,
-    fontWeight: "800",
+    fontWeight: "900",
     textTransform: "uppercase",
+    letterSpacing: 1,
   },
-  areaText: {
+  heroTitle: {
     color: "white",
-    fontSize: 28,
+    fontSize: 34,
     fontWeight: "900",
     marginTop: 4,
   },
-  areaSubtext: {
+  heroText: {
     color: "#94A3B8",
-    marginTop: 6,
+    marginTop: 8,
+    lineHeight: 21,
   },
   postCard: {
     backgroundColor: "#0F172A",
     padding: 16,
-    borderRadius: 24,
+    borderRadius: 26,
     marginBottom: 14,
     borderWidth: 1,
     borderColor: "#1E293B",
@@ -403,9 +654,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     backgroundColor: "#1E293B",
     justifyContent: "center",
     alignItems: "center",
@@ -416,29 +667,76 @@ const styles = StyleSheet.create({
   },
   author: {
     color: "white",
-    fontWeight: "800",
+    fontWeight: "900",
   },
   location: {
     color: "#64748B",
     fontSize: 12,
+    marginTop: 2,
+  },
+  more: {
+    color: "#64748B",
+    fontWeight: "900",
   },
   postText: {
     color: "white",
     fontSize: 16,
-    lineHeight: 23,
+    lineHeight: 24,
     marginBottom: 14,
   },
   reactionRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    flexWrap: "wrap",
+    gap: 8,
   },
   reaction: {
-    color: "#E2E8F0",
     backgroundColor: "#111827",
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 11,
     borderRadius: 999,
-    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#1E293B",
+  },
+  reactionText: {
+    color: "#E2E8F0",
+    fontWeight: "800",
+  },
+  floatingButton: {
+    position: "absolute",
+    right: 22,
+    bottom: 98,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#2563EB",
+    shadowOpacity: 0.4,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  floatingButtonText: {
+    color: "white",
+    fontSize: 36,
+    fontWeight: "500",
+    marginTop: -3,
+  },
+  screen: {
+    flex: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 100,
+  },
+  screenTitle: {
+    color: "white",
+    fontSize: 28,
+    fontWeight: "900",
+    marginBottom: 6,
+  },
+  screenSubtext: {
+    color: "#94A3B8",
+    marginBottom: 16,
+    lineHeight: 21,
   },
   input: {
     backgroundColor: "#0F172A",
@@ -452,7 +750,7 @@ const styles = StyleSheet.create({
   textArea: {
     backgroundColor: "#0F172A",
     color: "white",
-    minHeight: 180,
+    minHeight: 190,
     padding: 15,
     borderRadius: 22,
     borderWidth: 1,
@@ -477,6 +775,7 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     marginTop: 24,
     marginBottom: 10,
+    fontSize: 16,
   },
   chipWrap: {
     flexDirection: "row",
@@ -485,8 +784,8 @@ const styles = StyleSheet.create({
   },
   chip: {
     backgroundColor: "#0F172A",
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 11,
+    paddingHorizontal: 15,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: "#1E293B",
@@ -508,20 +807,25 @@ const styles = StyleSheet.create({
   },
   switchLabel: {
     color: "white",
-    fontWeight: "800",
+    fontWeight: "900",
+  },
+  switchHelp: {
+    color: "#94A3B8",
+    fontSize: 12,
+    marginTop: 3,
   },
   profileCard: {
     backgroundColor: "#0F172A",
     padding: 24,
-    borderRadius: 24,
+    borderRadius: 28,
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#1E293B",
   },
   profileAvatar: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
+    width: 92,
+    height: 92,
+    borderRadius: 46,
     backgroundColor: "#1E293B",
     alignItems: "center",
     justifyContent: "center",
@@ -536,6 +840,30 @@ const styles = StyleSheet.create({
     color: "white",
     fontSize: 22,
     fontWeight: "900",
+  },
+  statsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 18,
+  },
+  statBox: {
+    backgroundColor: "#111827",
+    borderRadius: 18,
+    padding: 14,
+    minWidth: 80,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#1E293B",
+  },
+  statNumber: {
+    color: "white",
+    fontWeight: "900",
+    fontSize: 18,
+  },
+  statLabel: {
+    color: "#94A3B8",
+    fontSize: 12,
+    marginTop: 3,
   },
   muted: {
     color: "#94A3B8",
@@ -561,19 +889,116 @@ const styles = StyleSheet.create({
     right: 16,
     bottom: 16,
     backgroundColor: "#0F172A",
-    borderRadius: 28,
+    borderRadius: 30,
     borderWidth: 1,
     borderColor: "#1E293B",
-    paddingVertical: 14,
+    paddingVertical: 10,
     flexDirection: "row",
     justifyContent: "space-around",
+  },
+  navButton: {
+    alignItems: "center",
+    minWidth: 62,
+  },
+  navIcon: {
+    fontSize: 18,
+    opacity: 0.55,
+  },
+  navIconActive: {
+    fontSize: 20,
   },
   navItem: {
     color: "#64748B",
     fontWeight: "800",
-    fontSize: 12,
+    fontSize: 11,
+    marginTop: 2,
   },
   navItemActive: {
     color: "#38BDF8",
+    fontWeight: "900",
+    fontSize: 11,
+    marginTop: 2,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(2, 6, 23, 0.75)",
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    maxHeight: "92%",
+    backgroundColor: "#020617",
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  modalTitle: {
+    color: "white",
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  closeButton: {
+    color: "white",
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  emptyCommentCard: {
+    backgroundColor: "#0F172A",
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+  },
+  commentCard: {
+    backgroundColor: "#0F172A",
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    marginBottom: 10,
+  },
+  commentAuthor: {
+    color: "white",
+    fontWeight: "900",
+    marginBottom: 5,
+  },
+  commentText: {
+    color: "#E2E8F0",
+    lineHeight: 20,
+  },
+  commentComposer: {
+    backgroundColor: "#0F172A",
+    borderRadius: 22,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: "#1E293B",
+    marginTop: 16,
+  },
+  commentInput: {
+    color: "white",
+    padding: 10,
+  },
+  commentControls: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+  sendButton: {
+    backgroundColor: "#2563EB",
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 999,
+  },
+  sendButtonText: {
+    color: "white",
+    fontWeight: "900",
   },
 });
